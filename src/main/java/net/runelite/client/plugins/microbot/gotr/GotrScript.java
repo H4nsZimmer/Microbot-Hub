@@ -7,6 +7,8 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
+import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.gotr.data.CellType;
 import net.runelite.client.plugins.microbot.gotr.data.GuardianPortalInfo;
 import net.runelite.client.plugins.microbot.gotr.data.Mode;
@@ -15,17 +17,17 @@ import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Spellbook;
 import net.runelite.client.plugins.microbot.util.math.Rs2Random;
-import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
-import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
+//import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2ObjectModel;
+
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -153,7 +155,7 @@ public class GotrScript extends Script {
                 if (isInMiniGame) {
 
                     if (waitingForGameToStart(timeToStart)) return;
-            
+
 
                     if (!Rs2Inventory.hasItem("Uncharged cell") && !isInLargeMine() && !isInHugeMine()) {
                         takeUnchargedCells();
@@ -242,16 +244,21 @@ public class GotrScript extends Script {
                 // Return to large mine if we were there before
                 if (!isInLargeMine() && shouldMineGuardianRemains) {
                     if (Rs2Walker.walkTo(new WorldPoint(3632, 9503, 0), 20)) {
-                        Rs2GameObject.interact(ObjectID.RUBBLE_43724);
-                        return true;
+                        Rs2TileObjectModel rubble = Microbot.getRs2TileObjectCache().query()
+                                .withId(ObjectID.RUBBLE_43724)
+                                .nearest();
+                        if (rubble != null) {
+                            rubble.click();
+                            return true;
+                        }
                     }
                 }
             }
 
             repairPouches();
-    
+
             if (!shouldMineGuardianRemains) return true;
-    
+
             mineGuardianRemains();
             return true;
         }
@@ -262,28 +269,36 @@ public class GotrScript extends Script {
         Rs2ItemModel cell = Rs2Inventory.get(CellType.PoweredCellList().stream().mapToInt(i -> i).toArray());
         if (cell != null && isInMainRegion() && isInMiniGame() && !shouldMineGuardianRemains && !isInLargeMine() && !isInHugeMine()) {
             int cellTier = CellType.GetCellTier(cell.getId());
-            List<Integer> shieldCellIds = Rs2GameObject.getObjectIdsByName("cell_tile");
+            List<Integer> shieldCellIds = getObjectIdsByName("cell_tile");
 
             if (Rs2Inventory.hasItemAmount(GUARDIAN_ESSENCE, 10)) {
                 for (int shieldCellId : shieldCellIds) {
-                    TileObject shieldCell = Rs2GameObject.getTileObject(shieldCellId);
+                    Rs2TileObjectModel shieldCell = Microbot.getRs2TileObjectCache().query()
+                            .withId(shieldCellId)
+                            .nearest();
                     if (shieldCell == null) continue;
                     if (CellType.GetShieldTier(shieldCell.getId()) < cellTier) {
                         Microbot.log("Upgrading power cell at " + shieldCell.getWorldLocation());
-                        Rs2GameObject.interact(shieldCell, "Place-cell");
+                        shieldCell.click("Place-cell");
                         sleepUntil(() -> !Rs2Player.isMoving());
                         return true;
                     }
                 }
             }
             shieldCellIds = shieldCellIds.stream().filter(id -> id != ObjectID.CELL_TILE_BROKEN).collect(Collectors.toList());
-            int interactedObjectId = Rs2GameObject.interact(shieldCellIds);
-            if (interactedObjectId != -1) {
-                log("Using cell with id " + interactedObjectId);
-                sleep(Rs2Random.randomGaussian(1000, 300));
-                sleepUntil(() -> !Rs2Player.isMoving());
+
+            for (int cellId : shieldCellIds) {
+                Rs2TileObjectModel cellTile = Microbot.getRs2TileObjectCache().query()
+                        .withId(cellId)
+                        .nearest();
+                if (cellTile != null) {
+                    cellTile.click();
+                    log("Using cell with id " + cellId);
+                    sleep(Rs2Random.randomGaussian(1000, 300));
+                    sleepUntil(() -> !Rs2Player.isMoving());
+                    return true;
+                }
             }
-            return true;
         }
         return false;
     }
@@ -291,11 +306,16 @@ public class GotrScript extends Script {
     private boolean powerUpGreatGuardian() {
         if (Rs2Inventory.hasItem("guardian stone") && !shouldMineGuardianRemains && !isInLargeMine() && !isInHugeMine()) {
             state = GotrState.POWERING_UP;
-            Rs2Npc.interact("The great guardian", "power-up");
-            log("Powering up the great guardian...");
-            sleepUntil(Rs2Player::isAnimating);
-            sleep(Rs2Random.randomGaussian(Rs2Random.between(1000, 2000), Rs2Random.between(100, 300)));
-            return true;
+            net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel greatGuardian = Microbot.getRs2NpcCache().query()
+                    .withName("The great guardian")
+                    .nearestOnClientThread();
+            if (greatGuardian != null) {
+                greatGuardian.click("power-up");
+                log("Powering up the great guardian...");
+                sleepUntil(Rs2Player::isAnimating);
+                sleep(Rs2Random.randomGaussian(Rs2Random.between(1000, 2000), Rs2Random.between(100, 300)));
+                return true;
+            }
         }
         return false;
     }
@@ -311,9 +331,14 @@ public class GotrScript extends Script {
                 }
             }
 
-            Rs2GameObject.interact(ObjectID.UNCHARGED_CELLS_43732, "Take-10");
-            log("Taking uncharged cells...");
-            Rs2Player.waitForAnimation();
+            Rs2TileObjectModel cells = Microbot.getRs2TileObjectCache().query()
+                    .withId(ObjectID.UNCHARGED_CELLS_43732)
+                    .nearest();
+            if (cells != null) {
+                cells.click("Take-10");
+                log("Taking uncharged cells...");
+                Rs2Player.waitForAnimation();
+            }
         }
     }
 
@@ -322,12 +347,18 @@ public class GotrScript extends Script {
             if (leaveLargeMine()) return true;
             Rs2Walker.walkFastCanvas(Microbot.getClient().getHintArrowPoint());
             sleepUntil(Rs2Player::isMoving);
-            Rs2GameObject.interact(Microbot.getClient().getHintArrowPoint());
-            log("Found a portal spawn...interacting with it...");
-            Rs2Player.waitForWalking();
-            sleepUntil(() -> isInHugeMine());
-            sleepUntil(() -> getGuardiansPower() > 0);
-            return true;
+
+            Rs2TileObjectModel portal = Microbot.getRs2TileObjectCache().query()
+                    .where(obj -> obj.getWorldLocation().equals(Microbot.getClient().getHintArrowPoint()))
+                    .nearest();
+            if (portal != null) {
+                portal.click();
+                log("Found a portal spawn...interacting with it...");
+                Rs2Player.waitForWalking();
+                sleepUntil(() -> isInHugeMine());
+                sleepUntil(() -> getGuardiansPower() > 0);
+                return true;
+            }
         }
         return false;
     }
@@ -335,11 +366,16 @@ public class GotrScript extends Script {
     private boolean depositRunesIntoPool() {
         if (config.shouldDepositRunes() && Rs2Inventory.hasItem(runeIds.stream().mapToInt(i -> i).toArray()) && !isInLargeMine() && !isInHugeMine() && !Rs2Inventory.isFull() && !optimizedEssenceLoop) {
             if (Rs2Player.isMoving()) return true;
-            if (Rs2GameObject.interact(ObjectID.DEPOSIT_POOL)) {
+
+            Rs2TileObjectModel depositPool = Microbot.getRs2TileObjectCache().query()
+                    .withId(ObjectID.DEPOSIT_POOL)
+                    .nearest();
+            if (depositPool != null) {
+                depositPool.click();
                 log("Deposit runes into pool...");
                 sleep(600, 2400);
+                return true;
             }
-            return true;
         }
         return false;
     }
@@ -348,33 +384,46 @@ public class GotrScript extends Script {
         GameObject availableAltar = getAvailableAltars().stream().findFirst().orElse(null);
         if (availableAltar != null && !Rs2Player.isMoving()) {
             log("Entering with altar " + availableAltar.getId());
-            Rs2GameObject.interact(availableAltar);
-            state = GotrState.ENTER_ALTAR;
-            Global.sleepUntil(() -> !isInMainRegion() || !Objects.equals(getAvailableAltars().stream().findFirst().orElse(null), availableAltar), 5000);
-            sleep(Rs2Random.randomGaussian(1000, 300));
-
-            return true;
+            Rs2TileObjectModel altar = Microbot.getRs2TileObjectCache().query()
+                    .withId(availableAltar.getId())
+                    .nearest();
+            if (altar != null) {
+                altar.click();
+                state = GotrState.ENTER_ALTAR;
+                Global.sleepUntil(() -> !isInMainRegion() || !Objects.equals(getAvailableAltars().stream().findFirst().orElse(null), availableAltar), 5000);
+                sleep(Rs2Random.randomGaussian(1000, 300));
+                return true;
+            }
         }
         return false;
     }
 
     private boolean craftGuardianEssences() {
-        if (Rs2GameObject.interact(ObjectID.WORKBENCH_43754)) {
+        Rs2TileObjectModel workbench = Microbot.getRs2TileObjectCache().query()
+                .withId(ObjectID.WORKBENCH_43754)
+                .nearest();
+        if (workbench != null) {
+            workbench.click();
             state = GotrState.CRAFT_GUARDIAN_ESSENCE;
             sleep(Rs2Random.randomGaussian(Rs2Random.between(600, 900), Rs2Random.between(150, 300)));
             log("Crafting guardian essences...");
             return true;
         }
-       return false;
+        return false;
     }
 
     private boolean leaveLargeMine() {
         if (isInLargeMine()) {
-            Rs2GameObject.interact(ObjectID.RUBBLE_43726);
-            Rs2Player.waitForAnimation();
-            log("Leaving large mine...");
-            state = GotrState.LEAVING_LARGE_MINE;
-            return true;
+            Rs2TileObjectModel rubble = Microbot.getRs2TileObjectCache().query()
+                    .withId(ObjectID.RUBBLE_43726)
+                    .nearest();
+            if (rubble != null) {
+                rubble.click();
+                Rs2Player.waitForAnimation();
+                log("Leaving large mine...");
+                state = GotrState.LEAVING_LARGE_MINE;
+                return true;
+            }
         }
         return false;
     }
@@ -413,16 +462,28 @@ public class GotrScript extends Script {
                 if (Rs2Inventory.hasItem(GUARDIAN_ESSENCE)) {
                     state = GotrState.CRAFTING_RUNES;
                     optimizedEssenceLoop = false;
-                    Rs2GameObject.interact(rcAltar.getId());
-                    log("Crafting runes on altar " + rcAltar.getId());
-                    sleep(Rs2Random.randomGaussian(Rs2Random.between(1000, 1500), 300));
+
+                    Rs2TileObjectModel altar = Microbot.getRs2TileObjectCache().query()
+                            .withId(rcAltar.getId())
+                            .nearest();
+                    if (altar != null) {
+                        altar.click();
+                        log("Crafting runes on altar " + rcAltar.getId());
+                        sleep(Rs2Random.randomGaussian(Rs2Random.between(1000, 1500), 300));
+                    }
                 } else if (!Rs2Player.isMoving()) {
                     state = GotrState.LEAVING_ALTAR;
                     TileObject rcPortal = findPortalToLeaveAltar();
-                    if (Rs2GameObject.interact(rcPortal.getId())) {
-                        log("Leaving the altar...");
-                        sleepUntilTrue(GotrScript::isInMainRegion,100,10000);
-                        sleep(Rs2Random.randomGaussian(750, 150));
+                    if (rcPortal != null) {
+                        Rs2TileObjectModel portal = Microbot.getRs2TileObjectCache().query()
+                                .withId(rcPortal.getId())
+                                .nearest();
+                        if (portal != null) {
+                            portal.click();
+                            log("Leaving the altar...");
+                            sleepUntilTrue(GotrScript::isInMainRegion, 100, 10000);
+                            sleep(Rs2Random.randomGaussian(750, 150));
+                        }
                     }
                 }
                 return true;
@@ -434,22 +495,37 @@ public class GotrScript extends Script {
     private static boolean waitForMinigameToStart() {
         if (!isInMainRegion()) {
             TileObject rcPortal = findPortalToLeaveAltar();
-            if (rcPortal != null && Rs2GameObject.interact(rcPortal.getId())) {
-                state = GotrState.LEAVING_ALTAR;
-                return true;
+            if (rcPortal != null) {
+                Rs2TileObjectModel portal = Microbot.getRs2TileObjectCache().query()
+                        .withId(rcPortal.getId())
+                        .nearest();
+                if (portal != null) {
+                    portal.click();
+                    state = GotrState.LEAVING_ALTAR;
+                    return true;
+                }
             }
         }
         resetPlugin();
         if (state != GotrState.WAITING) {
             state = GotrState.WAITING;
             log("Make sure to start the script near the minigame barrier.");
-            Rs2GameObject.interact(ObjectID.BARRIER_43849, "Peek");
+            Rs2TileObjectModel barrier = Microbot.getRs2TileObjectCache().query()
+                    .withId(ObjectID.BARRIER_43849)
+                    .nearest();
+            if (barrier != null) {
+                barrier.click("Peek");
+            }
         }
         return state == GotrState.WAITING;
     }
 
     private static boolean enterMinigame() {
-        if (Rs2GameObject.interact(ObjectID.BARRIER_43700, "quick-pass")) {
+        Rs2TileObjectModel barrier = Microbot.getRs2TileObjectCache().query()
+                .withId(ObjectID.BARRIER_43700)
+                .nearest();
+        if (barrier != null) {
+            barrier.click("quick-pass");
             Rs2Player.waitForWalking();
             state = GotrState.ENTER_GAME;
             GotrScript.shouldMineGuardianRemains = true;
@@ -476,10 +552,16 @@ public class GotrScript extends Script {
             }
             if (!Rs2Inventory.isFull()) {
                 if (!Rs2Player.isAnimating()) {
-                    Rs2GameObject.interact(ObjectID.HUGE_GUARDIAN_REMAINS);
-                    Rs2Player.waitForAnimation();
-                    if (!Rs2Player.isAnimating())
-                        Rs2GameObject.interact(ObjectID.HUGE_GUARDIAN_REMAINS);
+                    Rs2TileObjectModel hugeRemains = Microbot.getRs2TileObjectCache().query()
+                            .withId(ObjectID.HUGE_GUARDIAN_REMAINS)
+                            .nearest();
+                    if (hugeRemains != null) {
+                        hugeRemains.click();
+                        Rs2Player.waitForAnimation();
+                        if (!Rs2Player.isAnimating()) {
+                            hugeRemains.click();
+                        }
+                    }
                 }
             } else {
                 if (Rs2Inventory.allPouchesFull()) {
@@ -490,7 +572,12 @@ public class GotrScript extends Script {
                     Rs2Inventory.fillPouches();
                     sleep(Rs2Random.randomGaussian(Rs2Random.between(600, 1200), Rs2Random.between(100, 300)));
                     if (!Rs2Inventory.isFull()) {
-                        Rs2GameObject.interact(ObjectID.HUGE_GUARDIAN_REMAINS);
+                        Rs2TileObjectModel hugeRemains = Microbot.getRs2TileObjectCache().query()
+                                .withId(ObjectID.HUGE_GUARDIAN_REMAINS)
+                                .nearest();
+                        if (hugeRemains != null) {
+                            hugeRemains.click();
+                        }
                     }
                 }
             }
@@ -515,14 +602,24 @@ public class GotrScript extends Script {
             if (!isInLargeMine() && !isInHugeMine() && (!Rs2Inventory.hasItem(GUARDIAN_FRAGMENTS) || getStartTimer() == -1)) {
                 if (Rs2Walker.walkTo(new WorldPoint(3632, 9503, 0), 20)) {
                     log("Traveling to large mine...");
-                    Rs2GameObject.interact(ObjectID.RUBBLE_43724);
-                    if (sleepUntil(Rs2Player::isAnimating)) {
-                        sleepUntil(GotrScript::isInLargeMine);
-                        if (isInLargeMine()) {
-                            sleep(Rs2Random.randomGaussian(Rs2Random.between(2000, 2400), Rs2Random.between(100, 300)));
-                            log("Interacting with large guardian remains...");
-                            Rs2GameObject.interact(ObjectID.LARGE_GUARDIAN_REMAINS);
-                            sleepGaussian(1200, 150);
+                    Rs2TileObjectModel rubble = Microbot.getRs2TileObjectCache().query()
+                            .withId(ObjectID.RUBBLE_43724)
+                            .nearest();
+                    if (rubble != null) {
+                        rubble.click();
+                        if (sleepUntil(Rs2Player::isAnimating)) {
+                            sleepUntil(GotrScript::isInLargeMine);
+                            if (isInLargeMine()) {
+                                sleep(Rs2Random.randomGaussian(Rs2Random.between(2000, 2400), Rs2Random.between(100, 300)));
+                                log("Interacting with large guardian remains...");
+                                Rs2TileObjectModel largeRemains = Microbot.getRs2TileObjectCache().query()
+                                        .withId(ObjectID.LARGE_GUARDIAN_REMAINS)
+                                        .nearest();
+                                if (largeRemains != null) {
+                                    largeRemains.click();
+                                    sleepGaussian(1200, 150);
+                                }
+                            }
                         }
                     }
                 }
@@ -535,8 +632,13 @@ public class GotrScript extends Script {
                     checkPouches(Rs2Random.between(1, 20) == 2, Rs2Random.between(100, 600), Rs2Random.between(100, 300));
 
                     repairPouches();
-                    Rs2GameObject.interact(ObjectID.LARGE_GUARDIAN_REMAINS);
-                    sleepGaussian(1200, 150);
+                    Rs2TileObjectModel largeRemains = Microbot.getRs2TileObjectCache().query()
+                            .withId(ObjectID.LARGE_GUARDIAN_REMAINS)
+                            .nearest();
+                    if (largeRemains != null) {
+                        largeRemains.click();
+                        sleepGaussian(1200, 150);
+                    }
                 }
             }
         } else {
@@ -549,8 +651,13 @@ public class GotrScript extends Script {
                     Rs2Combat.setSpecState(true, 1000);
                 }
                 repairPouches();
-                Rs2GameObject.interact(ObjectID.GUARDIAN_PARTS_43716);
-                sleepGaussian(1200, 150);
+                Rs2TileObjectModel guardianParts = Microbot.getRs2TileObjectCache().query()
+                        .withId(ObjectID.GUARDIAN_PARTS_43716)
+                        .nearest();
+                if (guardianParts != null) {
+                    guardianParts.click();
+                    sleepGaussian(1200, 150);
+                }
                 // we can assume that if the player is mining within the startTimer range, he will get enough guardian remains for the game
                 shouldMineGuardianRemains = false;
             }
@@ -558,10 +665,14 @@ public class GotrScript extends Script {
     }
 
     private void leaveHugeMine() {
-        Rs2GameObject.interact(38044);
-        log("Leave huge mine...");
-        Global.sleepUntil(() -> !isInHugeMine(), 5000);
-
+        Rs2TileObjectModel exit = Microbot.getRs2TileObjectCache().query()
+                .withId(38044)
+                .nearest();
+        if (exit != null) {
+            exit.click();
+            log("Leave huge mine...");
+            Global.sleepUntil(() -> !isInHugeMine(), 5000);
+        }
     }
 
     private static boolean repairPouches() {
@@ -582,19 +693,51 @@ public class GotrScript extends Script {
     private static void repairWithCordelia() {
         if (!Rs2Inventory.hasDegradedPouch()) return;
         if (!Rs2Inventory.hasItem(ItemID.ABYSSAL_PEARLS)) return;
-        Rs2NpcModel pouchRepairNpc = Rs2Npc.getNpc(NpcID.APPRENTICE_CORDELIA_12180);
+
+        Rs2NpcModel pouchRepairNpc = Microbot.getRs2NpcCache().query()
+                .withId(NpcID.APPRENTICE_CORDELIA_12180)
+                .nearestOnClientThread();
+
         if (pouchRepairNpc == null) return;
-        if (!Rs2Npc.hasAction(pouchRepairNpc.getId(), "Repair")) return;
-        if (!Rs2Npc.canWalkTo(pouchRepairNpc, 10)) return;
-        if (!Rs2Npc.interact(pouchRepairNpc, "Repair")) return;
+        if (!hasAction(pouchRepairNpc.getId(), "Repair")) return;
+        if (!canWalkTo(pouchRepairNpc, 10)) return;
 
-        Microbot.log("Repairing pouches...");
+        if (pouchRepairNpc.click("Repair")) {
+            Microbot.log("Repairing pouches...");
+            Global.sleepUntil(() -> {
+                Rs2Dialogue.clickContinue();
+                return !Rs2Inventory.hasDegradedPouch();
+            }, 10000);
+        }
+    }
 
-        Global.sleepUntil(() -> {
-            Rs2Dialogue.clickContinue();
-            return !Rs2Inventory.hasDegradedPouch();
-        }, 10000);
+    // Helper method to check if NPC has action
+    private static boolean hasAction(int npcId, String action) {
+        Rs2NpcModel npc = Microbot.getRs2NpcCache().query()
+                .withId(npcId)
+                .first();
+        if (npc == null) return false;
 
+        NPC rawNpc = npc.getNpc();
+        if (rawNpc == null || rawNpc.getComposition() == null) return false;
+
+        String[] actions = rawNpc.getComposition().getActions();
+        if (actions == null) return false;
+
+        for (String a : actions) {
+            if (a != null && a.equalsIgnoreCase(action)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Helper method to check if can walk to NPC
+    private static boolean canWalkTo(Rs2NpcModel npc, int maxDistance) {
+        if (npc == null) return false;
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        WorldPoint npcLocation = npc.getWorldLocation();
+        return playerLocation.distanceTo(npcLocation) <= maxDistance;
     }
 
     @Override
@@ -672,13 +815,13 @@ public class GotrScript extends Script {
     public static List<GameObject> getAvailableAltars() {
         int elementalPoints = elementalRewardPoints;
         int catalyticPoints = catalyticRewardPoints;
-        List<GameObject> availableAltars = Rs2GameObject.getGameObjects().stream()
+
+        List<GameObject> availableAltars = Microbot.getRs2TileObjectCache().getStream()
                 .filter(x -> {
 
                     if (!guardianPortalInfo.containsKey(x.getId())) return false;
 
                     GuardianPortalInfo portalInfo = GotrScript.guardianPortalInfo.get(x.getId());
-
                     if (portalInfo.getRequiredLevel()
                             > Microbot.getClient().getBoostedSkillLevel(Skill.RUNECRAFT)) {
                         Microbot.log("Filtered altar " + portalInfo.getName() + " – insufficient RC level");
@@ -689,16 +832,27 @@ public class GotrScript extends Script {
                         return false;
                     }
 
-                    if (((DynamicObject) x.getRenderable()).getAnimation() == null) {
+
+                    // Cast to GameObject to access renderable
+                    if (!(x instanceof GameObject)) {
                         return false;
                     }
-                    if (((DynamicObject) x.getRenderable()).getAnimation().getId() != 9363) {
+                    GameObject gameObj = (GameObject) x;
+                    if (gameObj.getRenderable() == null || !(gameObj.getRenderable() instanceof DynamicObject)) {
+                        return false;
+                    }
+                    DynamicObject dynamicObj = (DynamicObject) gameObj.getRenderable();
+                    if (dynamicObj.getAnimation() == null) {
+                        return false;
+                    }
+                    if (dynamicObj.getAnimation().getId() != 9363) {
                         return false;
                     }
                     Microbot.log("Adding " + portalInfo.getName() + " to list of available altars");
                     return true;
 
                 })
+                .map(obj -> (GameObject) obj)
                 .collect(Collectors.toList());
 
         Microbot.log("Found " + availableAltars.size() + " active altars after filtering.");
@@ -766,34 +920,76 @@ public class GotrScript extends Script {
         Integer[] altarIds = new Integer[] {ObjectID.ALTAR_34760, ObjectID.ALTAR_34761, ObjectID.ALTAR_34762, ObjectID.ALTAR_34763, ObjectID.ALTAR_34764,
                 ObjectID.ALTAR_34765, ObjectID.ALTAR_34766, ObjectID.ALTAR_34767, ObjectID.ALTAR_34768, ObjectID.ALTAR_34769, ObjectID.ALTAR_34770,
                 ObjectID.ALTAR_34771, ObjectID.ALTAR_34772, ObjectID.ALTAR_43479};
-        return Rs2GameObject.findObject(altarIds);
+
+        for (int altarId : altarIds) {
+            Rs2TileObjectModel altar = Microbot.getRs2TileObjectCache().query()
+                    .withId(altarId)
+                    .nearest();
+            if (altar != null) {
+                return (TileObject) altar;
+            }
+        }
+        return null;
     }
 
     public static TileObject findPortalToLeaveAltar() {
-        Integer[] altarIds = new Integer[] {ObjectID.PORTAL_34748, ObjectID.PORTAL_34749, ObjectID.PORTAL_34750, ObjectID.PORTAL_34751, ObjectID.PORTAL_34752,
+        Integer[] portalIds = new Integer[] {ObjectID.PORTAL_34748, ObjectID.PORTAL_34749, ObjectID.PORTAL_34750, ObjectID.PORTAL_34751, ObjectID.PORTAL_34752,
                 ObjectID.PORTAL_34753, ObjectID.PORTAL_34754, ObjectID.PORTAL_34755, ObjectID.PORTAL_34756, ObjectID.PORTAL_34757, ObjectID.PORTAL_34758,
                 ObjectID.PORTAL_34758, ObjectID.PORTAL_34759, ObjectID.PORTAL_43478};
-        return Rs2GameObject.findObject(altarIds);
+
+        for (int portalId : portalIds) {
+            Rs2TileObjectModel portal = Microbot.getRs2TileObjectCache().query()
+                    .withId(portalId)
+                    .nearest();
+            if (portal != null) {
+                return (TileObject) portal;
+            }
+        }
+        return null;
     }
+
     public static boolean leaveMinigame() {
-        GotrScript.isInMiniGame = !isOutsideBarrier() && isInMainRegion(); 
+        GotrScript.isInMiniGame = !isOutsideBarrier() && isInMainRegion();
         if (!isInMiniGame) {
-            return true;    // Already outside the minigame, successfully left     
+            return true;    // Already outside the minigame, successfully left
         }
         if(isInLargeMine()) {
-            Rs2GameObject.interact(ObjectID.RUBBLE_43726);
-            Rs2Player.waitForAnimation();
-            sleepUntil(()-> !isInLargeMine());
-            if (isInLargeMine()){
-                log("Failed to leave large mine, retrying...");
-                return false;// Retry leaving large mine
+            Rs2TileObjectModel rubble = Microbot.getRs2TileObjectCache().query()
+                    .withId(ObjectID.RUBBLE_43726)
+                    .nearest();
+            if (rubble != null) {
+                rubble.click();
+                Rs2Player.waitForAnimation();
+                sleepUntil(() -> !isInLargeMine());
+                if (isInLargeMine()) {
+                    log("Failed to leave large mine, retrying...");
+                    return false;// Retry leaving large mine
+                }
             }
-            
-        }        
-        Rs2GameObject.interact(ObjectID.BARRIER_43700, "quick-pass");
-        Rs2Player.waitForWalking();
-        sleepUntil( ()-> {return !(!isOutsideBarrier() && isInMainRegion());}, 200);
-        GotrScript.isInMiniGame  = !isOutsideBarrier() && isInMainRegion();
-        return !GotrScript.isInMiniGame;// Successfully left the minigame
+        }
+
+        Rs2TileObjectModel barrier = Microbot.getRs2TileObjectCache().query()
+                .withId(ObjectID.BARRIER_43700)
+                .nearest();
+        if (barrier != null) {
+            barrier.click("quick-pass");
+            Rs2Player.waitForWalking();
+            sleepUntil(() -> {return !(!isOutsideBarrier() && isInMainRegion());}, 200);
+            GotrScript.isInMiniGame  = !isOutsideBarrier() && isInMainRegion();
+            return !GotrScript.isInMiniGame;// Successfully left the minigame
+        }
+        return false;
+    }
+
+    // Helper method to get object IDs by name
+    private static List<Integer> getObjectIdsByName(String name) {
+        return Microbot.getRs2TileObjectCache().getStream()
+                .filter(obj -> {
+                    String objName = Microbot.getClientThread().invoke(() -> obj.getName());
+                    return objName != null && objName.toLowerCase().contains(name.toLowerCase());
+                })
+                .map(TileObject::getId)
+                .distinct()
+                .collect(Collectors.toList());
     }
 }

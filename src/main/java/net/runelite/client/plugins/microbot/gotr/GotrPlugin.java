@@ -21,6 +21,8 @@ import net.runelite.client.plugins.microbot.pouch.PouchOverlay;
 import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.ui.overlay.OverlayManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import java.awt.*;
@@ -29,8 +31,8 @@ import java.util.Optional;
 import java.util.regex.Matcher;
 
 @PluginDescriptor(
-        name = PluginDescriptor.Mocrosoft + "GuardiansOfTheRift",
-        description = "Guardians of the rift plugin",
+        name = "Hans GuardiansOfTheRift",
+        description = "Guardians of the rift plugin fixed",
         tags = {"runecrafting", "guardians of the rift", "gotr", "microbot"},
         version = GotrPlugin.version,
         minClientVersion = "2.1.0",
@@ -42,6 +44,7 @@ import java.util.regex.Matcher;
 @Slf4j
 public class GotrPlugin extends Plugin {
     public static final String version = "1.5.0";
+    private static final Logger log = LoggerFactory.getLogger(GotrPlugin.class);
 
     @Inject
     private GotrConfig config;
@@ -96,6 +99,7 @@ public class GotrPlugin extends Plugin {
             GotrScript.resetPlugin();
         } else if (event.getGameState() == GameState.LOGGED_IN) {
             log.info("GameState changed to LOGGED_IN - initializing GOTR tasks");
+            gotrScript.run(config);
             // Initialize Pre/Post Schedule Requirements and Tasks when game information is available
         } else if (event.getGameState() == GameState.LOGIN_SCREEN) {
             GotrScript.isInMiniGame = false;
